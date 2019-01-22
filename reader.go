@@ -55,6 +55,7 @@ retry:
 				if !ok {
 					err = r.waitContext.Err()
 				}
+				r.w.unsubscribe(r.updates)
 				return
 			}
 		}

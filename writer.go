@@ -57,6 +57,10 @@ func (w *Writer) subscribe() <-chan struct{} {
 	return w.notifier.Subscribe()
 }
 
+func (w *Writer) unsubscribe(c <-chan struct{}) {
+	w.notifier.Unsubscribe(c)
+}
+
 func (w *Writer) isClosed() bool {
 	return atomic.LoadInt32(&w.closed) == 1
 }
