@@ -10,11 +10,12 @@ import (
 // Writer is a writer which notifies readers of writes.
 type Writer struct {
 	io.WriteCloser
-	mu      sync.Mutex
-	cond    sync.Cond
-	written int64
-	closed  int32
-	err     error
+
+	closed int32
+	err    error
+
+	mu       sync.Mutex
+	channels []chan struct{}
 }
 
 // WriteAborted is an error which is returned to Read of readers
@@ -23,9 +24,7 @@ var WriteAborted = errors.New("write aborted")
 
 // NewWriter creates a notifying writer.
 func NewWriter(w io.WriteCloser) *Writer {
-	nww := &Writer{WriteCloser: w}
-	nww.cond.L = &nww.mu
-	return nww
+	return &Writer{WriteCloser: w}
 }
 
 // Write implements the io.Writer interface.
@@ -36,10 +35,14 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 		return
 	}
 	if n > 0 {
-		w.cond.L.Lock()
-		w.written += int64(n)
-		w.cond.L.Unlock()
-		w.cond.Broadcast()
+		w.mu.Lock()
+		for _, c := range w.channels {
+			select {
+			case c <- struct{}{}:
+			default:
+			}
+		}
+		w.mu.Unlock()
 	}
 	return
 }
@@ -49,14 +52,26 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 func (w *Writer) Close() error {
 	err := w.WriteCloser.Close()
 	atomic.StoreInt32(&w.closed, 1)
+
+	w.mu.Lock()
+	for _, c := range w.channels {
+		close(c)
+	}
+	w.mu.Unlock()
+
 	return err
 }
 
 // Abort is used to make readers stop reading when some error
 // happens in the Writer. You must call Close after Abort.
 func (w *Writer) Abort() {
-	w.cond.L.Lock()
 	w.err = WriteAborted
-	w.cond.L.Unlock()
-	w.cond.Broadcast()
+}
+
+func (w *Writer) subscribe() <-chan struct{} {
+	c := make(chan struct{}, 1)
+	w.mu.Lock()
+	w.channels = append(w.channels, c)
+	w.mu.Unlock()
+	return c
 }

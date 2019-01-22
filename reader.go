@@ -11,13 +11,14 @@ import (
 // it is treated as a real EOF.
 type Reader struct {
 	io.Reader
-	w *Writer
+	w       *Writer
+	updates <-chan struct{}
 }
 
 // NewReader creates a new reader which waits writes
 // by the writer.
 func NewReader(r io.Reader, w *Writer) *Reader {
-	return &Reader{Reader: r, w: w}
+	return &Reader{Reader: r, w: w, updates: w.subscribe()}
 }
 
 // Read implements the io.Reader interface.
@@ -37,15 +38,7 @@ retry:
 		err = nil
 
 		if n == 0 {
-			r.w.cond.L.Lock()
-			written := r.w.written
-			for {
-				r.w.cond.Wait()
-				if r.w.written > written {
-					break
-				}
-			}
-			r.w.cond.L.Unlock()
+			<-r.updates
 			goto retry
 		}
 	}
