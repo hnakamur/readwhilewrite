@@ -29,8 +29,8 @@ func Example() {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
 			r := readwhilewrite.NewReader(f, w)
+			defer r.Close()
 			var buf [4096]byte
 			for {
 				n, err := r.Read(buf[:])

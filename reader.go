@@ -10,7 +10,7 @@ import (
 // an EOF after Close is called for the writer, then
 // it is treated as a real EOF.
 type Reader struct {
-	io.Reader
+	io.ReadCloser
 	w           *Writer
 	updates     <-chan struct{}
 	waitContext context.Context
@@ -18,11 +18,11 @@ type Reader struct {
 
 // NewReader creates a new reader which waits writes
 // by the writer.
-func NewReader(r io.Reader, w *Writer) *Reader {
+func NewReader(r io.ReadCloser, w *Writer) *Reader {
 	return &Reader{
-		Reader:  r,
-		w:       w,
-		updates: w.subscribe(),
+		ReadCloser: r,
+		w:          w,
+		updates:    w.subscribe(),
 	}
 }
 
@@ -30,9 +30,13 @@ func NewReader(r io.Reader, w *Writer) *Reader {
 //
 // When Abort and then Close is called for the writer,
 // WriteAborted is returned as err.
+//
+// When SetWaitContext was called before calling Read and
+// the context is done during waiting writes by the writer,
+// the error from the context is returned as err.
 func (r *Reader) Read(p []byte) (n int, err error) {
 retry:
-	n, err = r.Reader.Read(p)
+	n, err = r.ReadCloser.Read(p)
 	if err == io.EOF {
 		if r.w.isClosed() {
 			if r.w.err != nil {
@@ -55,12 +59,20 @@ retry:
 				if !ok {
 					err = r.waitContext.Err()
 				}
-				r.w.unsubscribe(r.updates)
 				return
 			}
 		}
 	}
 	return
+}
+
+// Close implements the io.Closer interface.
+//
+// Close closes the underlying reader.
+func (r *Reader) Close() error {
+	err := r.ReadCloser.Close()
+	r.w.unsubscribe(r.updates)
+	return err
 }
 
 // SetWaitContext sets the context for waiting writes by the writer
