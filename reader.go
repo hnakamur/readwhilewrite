@@ -2,7 +2,6 @@ package readwhilewrite
 
 import (
 	"io"
-	"sync/atomic"
 )
 
 // Reader is a reader which waits writes by the writer
@@ -29,7 +28,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 retry:
 	n, err = r.Reader.Read(p)
 	if err == io.EOF {
-		if atomic.LoadInt32(&r.w.closed) == 1 {
+		if r.w.isClosed() {
 			if r.w.err != nil {
 				err = r.w.err
 			}

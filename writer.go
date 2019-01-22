@@ -3,7 +3,6 @@ package readwhilewrite
 import (
 	"errors"
 	"io"
-	"sync"
 	"sync/atomic"
 )
 
@@ -14,8 +13,7 @@ type Writer struct {
 	closed int32
 	err    error
 
-	mu       sync.Mutex
-	channels []chan struct{}
+	notifier notifier
 }
 
 // WriteAborted is an error which is returned to Read of readers
@@ -35,14 +33,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 		return
 	}
 	if n > 0 {
-		w.mu.Lock()
-		for _, c := range w.channels {
-			select {
-			case c <- struct{}{}:
-			default:
-			}
-		}
-		w.mu.Unlock()
+		w.notifier.Notify()
 	}
 	return
 }
@@ -52,13 +43,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 func (w *Writer) Close() error {
 	err := w.WriteCloser.Close()
 	atomic.StoreInt32(&w.closed, 1)
-
-	w.mu.Lock()
-	for _, c := range w.channels {
-		close(c)
-	}
-	w.mu.Unlock()
-
+	w.notifier.Close()
 	return err
 }
 
@@ -69,9 +54,9 @@ func (w *Writer) Abort() {
 }
 
 func (w *Writer) subscribe() <-chan struct{} {
-	c := make(chan struct{}, 1)
-	w.mu.Lock()
-	w.channels = append(w.channels, c)
-	w.mu.Unlock()
-	return c
+	return w.notifier.Subscribe()
+}
+
+func (w *Writer) isClosed() bool {
+	return atomic.LoadInt32(&w.closed) == 1
 }
