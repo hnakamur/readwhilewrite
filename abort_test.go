@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/hnakamur/readwhilewrite"
 )
@@ -19,47 +18,15 @@ func TestWriter_Abort(t *testing.T) {
 	}
 	defer os.Remove(file.Name())
 
+	writerSteps := make([]chan struct{}, 4)
+	for i := range writerSteps {
+		writerSteps[i] = make(chan struct{})
+	}
+
 	w := readwhilewrite.NewWriter(file)
 
 	var wg sync.WaitGroup
-	wg.Add(3)
-
-	go func() {
-		defer wg.Done()
-
-		err := func() error {
-			_, err := w.Write([]byte("hello\n"))
-			if err != nil {
-				return err
-			}
-
-			time.Sleep(time.Second)
-			_, err = w.Write([]byte("world\n"))
-			if err != nil {
-				return err
-			}
-
-			time.Sleep(time.Second)
-			_, err = w.Write([]byte("goodbye\n"))
-			if err != nil {
-				return err
-			}
-
-			time.Sleep(time.Second)
-			_, err = w.Write([]byte("see you\n"))
-			if err != nil {
-				return err
-			}
-
-			return errors.New("intentional error for test")
-		}()
-		if err != nil {
-			// You should log the error in production here.
-
-			w.Abort()
-		}
-		w.Close()
-	}()
+	wg.Add(2)
 
 	var buf1 []byte
 	var r1err error
@@ -73,6 +40,8 @@ func TestWriter_Abort(t *testing.T) {
 			}
 			r := readwhilewrite.NewReader(f, w)
 			defer r.Close()
+
+			i := 0
 			var buf [4096]byte
 			for {
 				n, err := r.Read(buf[:])
@@ -85,6 +54,13 @@ func TestWriter_Abort(t *testing.T) {
 				if n > 0 {
 					buf1 = append(buf1, buf[:n]...)
 				}
+
+				<-writerSteps[i]
+				i++
+				if i == 2 {
+					<-writerSteps[i]
+					i++
+				}
 			}
 			return nil
 		}()
@@ -96,7 +72,10 @@ func TestWriter_Abort(t *testing.T) {
 		defer wg.Done()
 
 		r2err = func() error {
-			time.Sleep(1500 * time.Millisecond)
+			i := 0
+			<-writerSteps[i]
+			i++
+
 			f, err := os.Open(file.Name())
 			if err != nil {
 				return err
@@ -115,10 +94,47 @@ func TestWriter_Abort(t *testing.T) {
 				if n > 0 {
 					buf2 = append(buf2, buf[:n]...)
 				}
+
+				<-writerSteps[i]
+				i++
 			}
 			return nil
 		}()
 	}()
+
+	err = func() error {
+		_, err := w.Write([]byte("hello\n"))
+		if err != nil {
+			return err
+		}
+		close(writerSteps[0])
+
+		_, err = w.Write([]byte("world\n"))
+		if err != nil {
+			return err
+		}
+		close(writerSteps[1])
+
+		_, err = w.Write([]byte("goodbye\n"))
+		if err != nil {
+			return err
+		}
+		close(writerSteps[2])
+
+		_, err = w.Write([]byte("see you\n"))
+		if err != nil {
+			return err
+		}
+		close(writerSteps[3])
+
+		return errors.New("intentional error for test")
+	}()
+	if err != nil {
+		// You should log the error in production here.
+
+		w.Abort()
+	}
+	w.Close()
 
 	wg.Wait()
 	if r1err != readwhilewrite.WriteAborted {
