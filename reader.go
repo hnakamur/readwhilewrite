@@ -55,10 +55,8 @@ retry:
 			select {
 			case <-r.updates:
 				goto retry
-			case _, ok := <-done:
-				if !ok {
-					err = r.waitContext.Err()
-				}
+			case <-done:
+				err = r.waitContext.Err()
 				return
 			}
 		}
