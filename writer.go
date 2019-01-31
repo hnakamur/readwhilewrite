@@ -14,7 +14,6 @@ type Writer struct {
 	err    error
 
 	notifier notifier
-	written  int64
 }
 
 // WriteAborted is an error which is returned to Read of readers
@@ -34,7 +33,6 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 		return
 	}
 	if n > 0 {
-		atomic.AddInt64(&w.written, int64(n))
 		w.notifier.Notify()
 	}
 	return
@@ -65,8 +63,4 @@ func (w *Writer) unsubscribe(c <-chan struct{}) {
 
 func (w *Writer) isClosed() bool {
 	return atomic.LoadInt32(&w.closed) == 1
-}
-
-func (w *Writer) getWritten() int64 {
-	return atomic.LoadInt64(&w.written)
 }

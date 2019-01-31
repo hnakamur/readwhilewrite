@@ -7,7 +7,12 @@ import (
 	"os"
 )
 
-// SendFileHTTP serve a file as a HTTP response while fw is writing to the same file.
+// SendFileHTTP serves a file as a HTTP response while fw is writing to the same file.
+//
+// Once it gets an EOF, it waits more writes by the writer. If the ctx is done while
+// waiting, SendFileHTTP returns. Typically you want to pass r.Context() as ctx for
+// r *http.Request.
+//
 // If you set the Content-Length header before calling SendFileHTTP, the sendfile
 // system call is used on Linux.
 func SendFileHTTP(ctx context.Context, w http.ResponseWriter, file *os.File, fw *Writer) (n int64, err error) {
@@ -27,11 +32,10 @@ func SendFileHTTP(ctx context.Context, w http.ResponseWriter, file *os.File, fw 
 				err = fw.err
 				return
 			}
-			if n < fw.getWritten() {
-				continue
-			} else {
-				return
-			}
+
+			n1, err = io.Copy(w, file)
+			n += n1
+			return
 		}
 
 		select {
