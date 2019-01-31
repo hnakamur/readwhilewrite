@@ -7,36 +7,27 @@ import (
 	"os"
 )
 
-type HTTPFileSender struct {
-	file *os.File
-	w    *Writer
-}
-
-func NewHTTPFileSender(file *os.File, w *Writer) *HTTPFileSender {
-	return &HTTPFileSender{
-		file: file,
-		w:    w,
-	}
-}
-
-func (s *HTTPFileSender) Send(ctx context.Context, w http.ResponseWriter) (n int64, err error) {
-	wroteC := s.w.subscribe()
-	defer s.w.unsubscribe(wroteC)
+// SendFileHTTP serve a file as a HTTP response while fw is writing to the same file.
+// If you set the Content-Length header before calling SendFileHTTP, the sendfile
+// system call is used on Linux.
+func SendFileHTTP(ctx context.Context, w http.ResponseWriter, file *os.File, fw *Writer) (n int64, err error) {
+	wroteC := fw.subscribe()
+	defer fw.unsubscribe(wroteC)
 
 	var n1 int64
 	for {
-		n1, err = io.Copy(w, s.file)
+		n1, err = io.Copy(w, file)
 		n += n1
 		if err != nil && err != io.EOF {
 			return
 		}
 
-		if s.w.isClosed() {
-			if s.w.err != nil {
-				err = s.w.err
+		if fw.isClosed() {
+			if fw.err != nil {
+				err = fw.err
 				return
 			}
-			if n < s.w.getWritten() {
+			if n < fw.getWritten() {
 				continue
 			} else {
 				return
