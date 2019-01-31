@@ -27,7 +27,12 @@ func SendFileHTTP(ctx context.Context, w http.ResponseWriter, file *os.File, fw 
 			return
 		}
 
-		if fw.isClosed() {
+		select {
+		case _, ok := <-wroteC:
+			if ok {
+				continue
+			}
+
 			if fw.err != nil {
 				err = fw.err
 				return
@@ -36,11 +41,6 @@ func SendFileHTTP(ctx context.Context, w http.ResponseWriter, file *os.File, fw 
 			n1, err = io.Copy(w, file)
 			n += n1
 			return
-		}
-
-		select {
-		case <-wroteC:
-			continue
 		case <-ctx.Done():
 			err = ctx.Err()
 			return

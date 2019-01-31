@@ -3,16 +3,12 @@ package readwhilewrite
 import (
 	"errors"
 	"io"
-	"sync/atomic"
 )
 
 // Writer is a writer which notifies readers of writes.
 type Writer struct {
 	io.WriteCloser
-
-	closed int32
-	err    error
-
+	err      error
 	notifier notifier
 }
 
@@ -42,7 +38,6 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 // When readers got EOF after Close is called, it is the real EOF.
 func (w *Writer) Close() error {
 	err := w.WriteCloser.Close()
-	atomic.StoreInt32(&w.closed, 1)
 	w.notifier.Close()
 	return err
 }
@@ -59,8 +54,4 @@ func (w *Writer) subscribe() <-chan struct{} {
 
 func (w *Writer) unsubscribe(c <-chan struct{}) {
 	w.notifier.Unsubscribe(c)
-}
-
-func (w *Writer) isClosed() bool {
-	return atomic.LoadInt32(&w.closed) == 1
 }

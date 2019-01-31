@@ -7,11 +7,15 @@ import (
 type notifier struct {
 	mu       sync.Mutex
 	channels []chan struct{}
+	closed   bool
 }
 
 func (n *notifier) Subscribe() <-chan struct{} {
 	c := make(chan struct{}, 1)
 	n.mu.Lock()
+	if n.closed {
+		close(c)
+	}
 	n.channels = append(n.channels, c)
 	n.mu.Unlock()
 	return c
@@ -44,5 +48,6 @@ func (n *notifier) Close() {
 	for _, c := range n.channels {
 		close(c)
 	}
+	n.closed = true
 	n.mu.Unlock()
 }
