@@ -57,19 +57,19 @@ func Example() {
 			return err
 		}
 
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 		_, err = w.Write([]byte("world\n"))
 		if err != nil {
 			return err
 		}
 
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 		_, err = w.Write([]byte("goodbye\n"))
 		if err != nil {
 			return err
 		}
 
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 		_, err = w.Write([]byte("see you\n"))
 		if err != nil {
 			return err
@@ -80,7 +80,7 @@ func Example() {
 	if err != nil {
 		// You should log the error in production here.
 
-		w.Abort()
+		w.Cancel()
 	}
 	w.Close()
 

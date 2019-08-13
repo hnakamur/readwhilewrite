@@ -3,55 +3,62 @@ package readwhilewrite
 import (
 	"errors"
 	"io"
+	"sync"
+	"sync/atomic"
 )
 
 // Writer is a writer which notifies readers of writes.
+// Writer implements the io.WriteCloser interface.
 type Writer struct {
-	io.WriteCloser
-	err      error
-	notifier notifier
+	w        io.WriteCloser
+	mu       sync.Mutex
+	cond     sync.Cond
+	written  int64
+	closed   int32
+	canceled int32
 }
 
-// WriteAborted is an error which is returned to Read of readers
-// when Abort and then Close is called for a writer.
-var WriteAborted = errors.New("write aborted")
+// ErrWriterCanceled is an error which is returned to Read of readers
+// when Cancel is called for a writer.
+var ErrWriterCanceled = errors.New("writer canceled")
 
 // NewWriter creates a notifying writer.
 func NewWriter(w io.WriteCloser) *Writer {
-	return &Writer{WriteCloser: w}
+	w2 := &Writer{
+		w: w,
+	}
+	w2.cond.L = &w2.mu
+	return w2
 }
 
-// Write implements the io.Writer interface.
+// Write implements the io.Writeer interface.
 // Write notify readers if n > 0.
 func (w *Writer) Write(p []byte) (n int, err error) {
-	n, err = w.WriteCloser.Write(p)
+	n, err = w.w.Write(p)
 	if err != nil {
 		return
 	}
 	if n > 0 {
-		w.notifier.Notify()
+		atomic.AddInt64(&w.written, int64(n))
+		w.cond.Broadcast()
 	}
 	return
 }
 
+// Close implements the io.Closer interface.
 // Close closes the underlying writer.
 // When readers got EOF after Close is called, it is the real EOF.
 func (w *Writer) Close() error {
-	err := w.WriteCloser.Close()
-	w.notifier.Close()
+	err := w.w.Close()
+	atomic.StoreInt32(&w.closed, 1)
+	w.cond.Broadcast()
 	return err
 }
 
-// Abort is used to make readers stop reading when some error
-// happens in the Writer. You must call Close after Abort.
-func (w *Writer) Abort() {
-	w.err = WriteAborted
-}
-
-func (w *Writer) subscribe() <-chan struct{} {
-	return w.notifier.Subscribe()
-}
-
-func (w *Writer) unsubscribe(c <-chan struct{}) {
-	w.notifier.Unsubscribe(c)
+// Cancel is used to make all readers stop reading when some error
+// happens in the Writer. You must call Close after Cancel for
+// cleanup.
+func (w *Writer) Cancel() {
+	atomic.StoreInt32(&w.canceled, 1)
+	w.cond.Broadcast()
 }

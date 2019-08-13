@@ -1,28 +1,32 @@
 package readwhilewrite
 
 import (
-	"context"
+	"errors"
 	"io"
+	"sync/atomic"
 )
 
 // Reader is a reader which waits writes by the writer
 // when the reader gets an EOF. When the reader gets
 // an EOF after Close is called for the writer, then
 // it is treated as a real EOF.
+// Reader implements the io.ReadCloser interface.
 type Reader struct {
-	io.ReadCloser
-	w           *Writer
-	updates     <-chan struct{}
-	waitContext context.Context
+	r        io.ReadCloser
+	w        *Writer
+	canceled int32
 }
+
+// ErrReaderCanceled is an error which is returned to Read of readers
+// when Cancel is called for a reader.
+var ErrReaderCanceled = errors.New("reader canceled")
 
 // NewReader creates a new reader which waits writes
 // by the writer.
 func NewReader(r io.ReadCloser, w *Writer) *Reader {
 	return &Reader{
-		ReadCloser: r,
-		w:          w,
-		updates:    w.subscribe(),
+		r: r,
+		w: w,
 	}
 }
 
@@ -36,31 +40,39 @@ func NewReader(r io.ReadCloser, w *Writer) *Reader {
 // the error from the context is returned as err.
 func (r *Reader) Read(p []byte) (n int, err error) {
 	for {
-		n, err = r.ReadCloser.Read(p)
+		n, err = r.r.Read(p)
 		if err == io.EOF {
+			if atomic.LoadInt32(&r.canceled) == 1 {
+				return n, ErrReaderCanceled
+			}
+			if atomic.LoadInt32(&r.w.canceled) == 1 {
+				return n, ErrWriterCanceled
+			}
+			if atomic.LoadInt32(&r.w.closed) == 1 {
+				return n, io.EOF
+			}
+
 			err = nil
 			if n == 0 {
-				var done <-chan struct{}
-				if r.waitContext != nil {
-					done = r.waitContext.Done()
-				}
-
-				select {
-				case _, ok := <-r.updates:
-					if ok {
-						continue
+				r.w.cond.L.Lock()
+				written := r.w.written
+				for {
+					r.w.cond.Wait()
+					if atomic.LoadInt32(&r.canceled) == 1 {
+						return 0, ErrReaderCanceled
 					}
-
-					if r.w.err != nil {
-						err = r.w.err
-					} else {
-						err = io.EOF
+					if atomic.LoadInt32(&r.w.canceled) == 1 {
+						return 0, ErrWriterCanceled
 					}
-					return
-				case <-done:
-					err = r.waitContext.Err()
-					return
+					if r.w.written > written {
+						break
+					}
+					if atomic.LoadInt32(&r.w.closed) == 1 {
+						return 0, io.EOF
+					}
 				}
+				r.w.cond.L.Unlock()
+				continue
 			}
 		}
 		return
@@ -71,21 +83,12 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 //
 // Close closes the underlying reader.
 func (r *Reader) Close() error {
-	err := r.ReadCloser.Close()
-	r.w.unsubscribe(r.updates)
-	return err
+	return r.r.Close()
 }
 
-// SetWaitContext sets the context for waiting writes by the writer
-// after the reader received a temporary EOF in Read.
-//
-// Note SetWaitContext does not set a deadline for Read of the underlying
-// reader.  If you want to set a deadline, you need to call an appropriate
-// method for the underlying reader yourself, for example SetReadDeadline
-// of *os.File.
-//
-// Also note SetReadDeadline of *os.File is not supported for ordinal files
-// on most systems. See document of SetDeadline of *os.File.
-func (r *Reader) SetWaitContext(ctx context.Context) {
-	r.waitContext = ctx
+// Cancel cancels this reader.
+// ErrReaderCanceled is returned from the Read method of the reader.
+func (r *Reader) Cancel() {
+	atomic.StoreInt32(&r.canceled, 1)
+	r.w.cond.Broadcast()
 }

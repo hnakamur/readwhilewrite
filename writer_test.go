@@ -1,7 +1,7 @@
 package readwhilewrite_test
 
 import (
-	"context"
+	"errors"
 	"io"
 	"io/ioutil"
 	"os"
@@ -11,7 +11,7 @@ import (
 	"github.com/hnakamur/readwhilewrite"
 )
 
-func TestReader_SetWaitContext(t *testing.T) {
+func TestWriter_Cancel(t *testing.T) {
 	file, err := ioutil.TempFile("", "test")
 	if err != nil {
 		t.Fatal(err)
@@ -22,10 +22,6 @@ func TestReader_SetWaitContext(t *testing.T) {
 	for i := range writerSteps {
 		writerSteps[i] = make(chan struct{})
 	}
-
-	reader1C := make(chan struct{})
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	w := readwhilewrite.NewWriter(file)
 
@@ -45,8 +41,7 @@ func TestReader_SetWaitContext(t *testing.T) {
 			r := readwhilewrite.NewReader(f, w)
 			defer r.Close()
 
-			r.SetWaitContext(ctx)
-
+			i := 0
 			var buf [4096]byte
 			for {
 				n, err := r.Read(buf[:])
@@ -54,11 +49,17 @@ func TestReader_SetWaitContext(t *testing.T) {
 					break
 				}
 				if err != nil {
-					close(reader1C)
 					return err
 				}
 				if n > 0 {
 					buf1 = append(buf1, buf[:n]...)
+				}
+
+				<-writerSteps[i]
+				i++
+				if i == 2 {
+					<-writerSteps[i]
+					i++
 				}
 			}
 			return nil
@@ -81,7 +82,6 @@ func TestReader_SetWaitContext(t *testing.T) {
 			}
 			r := readwhilewrite.NewReader(f, w)
 			defer r.Close()
-
 			var buf [4096]byte
 			for {
 				n, err := r.Read(buf[:])
@@ -115,9 +115,6 @@ func TestReader_SetWaitContext(t *testing.T) {
 		}
 		close(writerSteps[1])
 
-		cancel()
-		<-reader1C
-
 		_, err = w.Write([]byte("goodbye\n"))
 		if err != nil {
 			return err
@@ -130,35 +127,20 @@ func TestReader_SetWaitContext(t *testing.T) {
 		}
 		close(writerSteps[3])
 
-		return nil
+		return errors.New("intentional error for test")
 	}()
 	if err != nil {
 		// You should log the error in production here.
 
-		w.Abort()
+		w.Cancel()
 	}
 	w.Close()
 
 	wg.Wait()
-
-	want1 := "hello\nworld\n"
-	want2 := "hello\nworld\ngoodbye\nsee you\n"
-
-	got1 := string(buf1)
-	if got1 != want1 {
-		t.Errorf("Unexpected reader1 result, got=%s, want=%s", got1, want1)
+	if r1err != readwhilewrite.ErrWriterCanceled {
+		t.Errorf("Unexpected reader1 error result, got=%v, want=%v", r1err, readwhilewrite.ErrWriterCanceled)
 	}
-
-	got2 := string(buf2)
-	if got2 != want2 {
-		t.Errorf("Unexpected reader1 result, got=%s, want=%s", got2, want2)
-	}
-
-	if r1err != context.Canceled {
-		t.Errorf("Unexpected reader1 error, got=%v, want=%v", r1err, context.Canceled)
-	}
-
-	if r2err != nil {
-		t.Errorf("Unexpected reader1 error=%v", r2err)
+	if r2err != readwhilewrite.ErrWriterCanceled {
+		t.Errorf("Unexpected reader2 error result, got=%v, want=%v", r2err, readwhilewrite.ErrWriterCanceled)
 	}
 }
