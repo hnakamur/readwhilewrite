@@ -3,6 +3,7 @@ package readwhilewrite
 import (
 	"errors"
 	"io"
+	"log"
 	"sync/atomic"
 )
 
@@ -54,20 +55,28 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 			err = nil
 			if n == 0 {
+				log.Printf("in loop, before reader wait")
+				written := atomic.LoadInt64(&r.w.written)
 				r.w.cond.L.Lock()
-				written := r.w.written
 				for {
 					r.w.cond.Wait()
 					if atomic.LoadInt32(&r.canceled) == 1 {
+						r.w.cond.L.Unlock()
+						log.Printf("in loop, reader canceled")
 						return 0, ErrReaderCanceled
 					}
 					if atomic.LoadInt32(&r.w.canceled) == 1 {
+						r.w.cond.L.Unlock()
+						log.Printf("in loop, writer canceled")
 						return 0, ErrWriterCanceled
 					}
-					if r.w.written > written {
+					if atomic.LoadInt64(&r.w.written) > written {
+						log.Printf("in loop, notice writes proceed")
 						break
 					}
 					if atomic.LoadInt32(&r.w.closed) == 1 {
+						r.w.cond.L.Unlock()
+						log.Printf("in loop, writer closed")
 						return 0, io.EOF
 					}
 				}

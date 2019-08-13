@@ -3,6 +3,7 @@ package readwhilewrite
 import (
 	"errors"
 	"io"
+	"log"
 	"sync"
 	"sync/atomic"
 )
@@ -40,6 +41,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 	}
 	if n > 0 {
 		atomic.AddInt64(&w.written, int64(n))
+		log.Printf("before broadcast writer write")
 		w.cond.Broadcast()
 	}
 	return
@@ -51,6 +53,7 @@ func (w *Writer) Write(p []byte) (n int, err error) {
 func (w *Writer) Close() error {
 	err := w.w.Close()
 	atomic.StoreInt32(&w.closed, 1)
+	log.Printf("before broadcast writer close")
 	w.cond.Broadcast()
 	return err
 }
@@ -60,5 +63,6 @@ func (w *Writer) Close() error {
 // cleanup.
 func (w *Writer) Cancel() {
 	atomic.StoreInt32(&w.canceled, 1)
+	log.Printf("before broadcast writer cancel")
 	w.cond.Broadcast()
 }

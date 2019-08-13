@@ -4,6 +4,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -203,17 +204,15 @@ func TestReader_Cancel(t *testing.T) {
 					buf1 = append(buf1, buf[:n]...)
 				}
 
-				if i >= len(writerSteps)-1 {
-					return nil
-				}
-				<-writerSteps[i]
-				i++
-				if i == 2 {
-					if i >= len(writerSteps)-1 {
-						return nil
-					}
+				if i < len(writerSteps)-1 {
 					<-writerSteps[i]
 					i++
+				}
+				if i == 2 {
+					if i < len(writerSteps)-1 {
+						<-writerSteps[i]
+						i++
+					}
 				}
 			}
 			return nil
@@ -252,11 +251,10 @@ func TestReader_Cancel(t *testing.T) {
 					buf2 = append(buf2, buf[:n]...)
 				}
 
-				if i >= len(writerSteps)-1 {
-					return nil
+				if i < len(writerSteps)-1 {
+					<-writerSteps[i]
+					i++
 				}
-				<-writerSteps[i]
-				i++
 			}
 			return nil
 		}()
@@ -308,8 +306,8 @@ func TestReader_Cancel(t *testing.T) {
 
 	got2 := string(buf2)
 	want2 := "hello\nworld\ngoodbye\n"
-	if got2 != want2 {
-		t.Errorf("Unexpected reader2 result, got=%s, want=%s", got2, want2)
+	if !strings.HasPrefix(got2, want2) {
+		t.Errorf("Unexpected reader2 result strings.HasPrefix(got2, want2) must be true, got=%s, want=%s", got2, want2)
 	}
 
 	if r1err != nil {
